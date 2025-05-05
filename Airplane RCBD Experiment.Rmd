@@ -1,0 +1,182 @@
+---
+title: "Airplane RCBD Experiment"
+author: "John Ramirez"
+date: "2024-12-10"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction 
+Aviation design has been an extremely important topic since its inception. One important part of airplane design is it's weight distribution. The reason for weight distribution being so important is that it can affect how fast an aircraft can travel, it's fuel consumption and if it can even fly correctly. When looking at airplanes, the "Weight and balance refer to the weight of an aircraft and the location of the centre of gravity." (Van Es, G. W. H., 2007), and this is the main concern about a plane's performance given its weight. The airplanes weight and center of gravity is very important as having too much weight or a center of gravity not in the optimal position will can make it very inefficient when flying. It can be seen that "Increased aircraft weight, whether attributed to the occupants, accompanying cargo or both, adversely affects aircraft performance in a variety of flight parameters" (Boyd, Douglas D, 2016) and this is part of what will be looked at in this experiment.
+
+By using paper airplanes, we can see the impact of weight in terms of flight distance. The research question that is being investigated is, how does a paper clip impact flight distance on a paper airplane? By using paper clips we will be able to see how weight can affect an airplanes flight. Our null hypothesis will be: paper clips do not impact flight distance of a paper airplane. Our alternative hypothesis will be: paper clips impact flight distance of an airplane
+
+# Methods 
+With a randomized complete block design, the data was obtained by creating 20 paper airplanes, all the exact same way, and then putting paper clips on 15 of them. Which planes had paperclips and where were determined randomly and were not planned out before hand. The first 5 had no paper clips on them and were our control group. The next 5 had paperclips on the front, with the paperclip being down the nose of the plane. The next 5 had paperclips in the middle, with it being on a flap of paper between the wings. The final 5 had paper clips on one of the back wings. Each  The planes were thrown outside in the same location and the same time to allow all planes to have the same weather factors, that being having a clear sky with a very small breeze. If the planes were thrown at different times there may have been different a difference in wind which could have affected the results. The other issue would have been if there was any mist or rain which would have made the planes wet and harder to fly. Throwing all planes at the same time, location and in the same manner, allowed there to be no differences in their flights, aside from the paperclips placement, which is ideal. Each plane was measured where the tip hit the ground 
+
+![]("C:/Users/johnr/OneDrive/Documents/PSTAT 122/Airplanes.JPG")
+
+For our first analysis, we will be using the "Analysis of variance (ANOVA)" which "is a statistical technique to analyze variation in a response variable (continuous random variable) measured under conditions defined by discrete factors (classification variables, often with nominal levels)"(Larson, Martin G, 2008). ANOVA will allow us to determine if we reject or fail to reject our null hypothesis. Because we also need to see if the data is normal for ANOVA, we must find the residuals and plot a histogram, then perform a Shapiro Wilk test
+
+```{r}
+library(ggplot2)
+# creating data frame for the data
+plane1 <- c(137, 128, 139, 233)
+plane2 <- c(131, 131, 184, 52)
+plane3 <- c(81, 155, 207, 147)
+plane4 <- c(165, 147, 131, 126)
+plane5 <- c(119, 187, 239, 100)
+
+airplanes_df <- data.frame(
+  distance = c(plane1, plane2, plane3, plane4, plane5),
+  treatment = rep(c("None", "Front", "Mid", "Back"), times = 5),
+  plane = c(rep("Plane1", 4),
+            rep("Plane2", 4),
+            rep("Plane3", 4),
+            rep("Plane4", 4),
+            rep("Plane5", 4))
+)
+```
+
+Here we begin to look at the residuals and perfrom the Shapiro Wilk Test. The residuals can be found by subtracting each value by the mean of the respective vector. There a different normality tests and "normality tests such as the Shapiro-Wilk test can be used to verify whether this assumption is met or violated."(de Souza, Rafael Rodrigues, 2023)
+```{r}
+plane1_resid <- plane1 - mean(plane1)
+plane2_resid <- plane2 - mean(plane2)
+plane3_resid <- plane3 - mean(plane3)
+plane4_resid <- plane4 - mean(plane4)
+plane5_resid <- plane5 - mean(plane5)
+planes_resid <- c(plane1_resid, plane2_resid, plane3_resid, plane4_resid, plane5_resid)
+hist(planes_resid)
+qqnorm(planes_resid)
+qqline(planes_resid)
+shapiro.test(planes_resid)
+```
+Because the p-value is extremely large, we fail to reject $H_{0}$ and conclude that there is not statistically significant evidence that the residuals do not follow a normal distribution. Because we are not able to conclude that the values do not follow a normal distribution, we can carry on with ANOVA
+
+```{r}
+airplanes_df$treatment <- as.factor(airplanes_df$treatment)
+
+
+anova_result <- aov(distance ~ treatment + plane, data = airplanes_df)
+anova_summary <- summary(anova_result)
+
+anova_table <- as.data.frame(anova_summary[[1]])
+knitr::kable(anova_table)
+```
+Because our p value from the anova table is above 0.05, then we fail to reject the null hypothesis and thus conclude that paper clips do not affect flight distance of paper airplanes. 
+
+Now we are on to the Tukey test, which is "to allow the computation of confidence intervals for the differences between the means"(Abdi, Hervé, and Lynne J. Williams, 2010). Running the test with our ANOVA results will allow us to check if there is any significance between each factor.
+```{r}
+tukey_result <- TukeyHSD(anova_result)
+tukey_table <- as.data.frame(tukey_result[[1]])
+knitr::kable(tukey_table)
+```
+Because all of our p-values in the Tukey test are extremely high, there is no statistically significant difference between any of the different treatments. 
+```{r}
+theme_update(text = element_text(size = 13))
+
+ggplot(data = airplanes_df, aes(y = distance, x = treatment, group = plane, color = plane)) + 
+  geom_point() + geom_line() +
+  scale_x_discrete(limits = c("None", "Front", "Mid", "Back")) +
+  ggtitle("Paper airplane distances with different paperclip placement")
+```
+
+Looking at the n values from the sum_stats, we can see that best case, the sample size would have been 5 and worst case the sample size would have been 28. Based on an earlier experiment with airplanes and paper clips, there was determined to be 5 groups of planes for the blocks, as that would allow for 5 values for each group, which is how that lab was carried out. If we had 28 paper airplanes then that would have been an ideal sample size for our experiment.
+```{r, message = FALSE}
+library(dplyr)
+sum_stats <- airplanes_df %>%
+  group_by(treatment) %>%
+  summarize(mean=mean(distance), var=var(distance))
+
+knitr::kable(sum_stats)
+groupmeans <- c(131.6, 149.6, 180, 126.6)
+knitr::kable(power.anova.test(groups=length(groupmeans),
+                 between.var=var(groupmeans),
+                 within.var=562,
+                 power=0.8, sig.level=0.05, n=NULL)$n)
+
+knitr::kable(power.anova.test(groups=length(groupmeans),
+                 between.var=var(groupmeans),
+                 within.var=4471,
+                 power=0.8, sig.level=0.05, n=NULL)$n)
+
+``` 
+
+```{r}
+between.var <- seq(50, 200, by=10)
+
+n_var1 <- NA
+for(i in 1:length(between.var)){
+  n_var1[i] <- power.anova.test(groups = 4,
+                                between.var = between.var[i],
+                                within.var = 4471,
+                                power = 0.8, sig.level = 0.05, n = NULL)$n
+}
+
+between.var <- seq(50, 200, by=10)
+
+n_var2 <- NA
+for(i in 1:length(between.var)){
+  n_var2[i] <- power.anova.test(groups = 4,
+                                between.var = between.var[i],
+                                within.var = 562,
+                                power = 0.8, sig.level = 0.05, n = NULL)$n
+}
+
+between.var <- seq(50, 200, by=10)
+
+n_var3 <- NA
+for(i in 1:length(between.var)){
+  n_var3[i] <- power.anova.test(groups = 4,
+                                between.var = between.var[i],
+                                within.var = 2077,
+                                power = 0.8, sig.level = 0.05, n = NULL)$n
+}
+between.var <- seq(50, 200, by=10)
+n_var4 <- NA
+for(i in 1:length(between.var)){
+  n_var4[i] <- power.anova.test(groups = 4,
+                                between.var = between.var[i],
+                                within.var = 935,
+                                power = 0.8, sig.level = 0.05, n = NULL)$n
+}
+
+sample_sizes <- data.frame(
+  n = c(n_var1, n_var2, n_var3, n_var4),
+  between.var = rep(between.var, 4),
+  within.var = c(rep("4471", length(n_var1)),
+                 rep("562", length(n_var2)),
+                 rep("2077", length(n_var3)),
+                 rep("935", length(n_var4)))
+)
+
+library(ggplot2)
+sample_sizes$within.var <- factor(sample_sizes$within.var, levels = c("562", "935", "2077", "4471"))
+ggplot(data = sample_sizes, mapping = aes(x = between.var, y = n,
+       group = within.var, color = within.var)) +
+  geom_point() +
+  geom_line()
+```
+
+# Discussion 
+This experiment was made to show how paper clips would impact the flight distance of a paper airplane by way of RCBD. Based on the values gathered and all of the tests done, we were not able to conclude that paper clips had an impact on the flight distance of the paper airplanes. Each treatment had a vast range of values and as such, one did not stand out among the others. For example, it can be seen that the planes with paperclips on the back had the lowest distance, but also the second highest distance, making for an extremely large range. The Tukey test was able to confirm that there was no statistically significant difference between each of the treatments in the experiment. These findings can be important for actual airplane design.
+
+Based on the results the weight of an airplane would not affect flight distance, however we can see that this is not the case when looking at actual airplanes. To restate from the introduction, "Increased aircraft weight, whether attributed to the occupants, accompanying cargo or both, adversely affects aircraft performance in a variety of flight parameters" (Boyd, Douglas D, 2016). As we know this to be the case, we know that the experiment with the paper airplanes produced results that would not be significant when looking at real airplanes, and this could be for a factor or reasons. 
+
+The results may have been normally distributed, which allowed us to run ANOVA, however different factors in the experiment is what may have led to the failure to reject the null hypothesis. Some of the planes had flown off to the side and rode the wall near the test side, which allowed it to stay in the air longer than if the wall wasn't there. Removing any opportunity for the plane to wall ride would have affected its distance and may have affected the overall results of the experiment. Additionally while each plane was thrown during the same time of day, and the same day, some may have caught a small breeze while others would have been unaffected, which would have allowed them to travel farther and affect the results. Another factor could have been plane design, as even though the planes were all made the same way, the design could have made the planes fly for similar distances, regardless of weight. Lastly, human error may have affected the flight distances. While each plane was thrown by the same person, any slight change in throwing style, even if not intended, would have affected results, as a less angled throw would have limited air time which would have made the plane travel less distance.
+
+The results indicated that weight differences in planes and where that weight is would not affect travel distance. Based on the many errors that made have occurred, as well as the other information that weight does affect how long a plane could stay in the air, it is highly possible that there is an error in the conclusion. A bigger sample size, a wide open outdoor area, and possibly additional paper clip placements maybe have given better results and a more accurate conclusion. 
+
+# References
+
+Abdi, Hervé, and Lynne J. Williams. "Newman-Keuls test and Tukey test." Encyclopedia of research design 2 (2010): 897-902.
+Boyd, Douglas D. "General aviation accidents related to exceedance of airplane weight/center of gravity limits." Accident Analysis & Prevention 91 (2016): 19-23.
+González-Estrada, Elizabeth, and Waldenia Cosmes. "Shapiro–Wilk test for skew normal distributions based on data transformations." Journal of Statistical Computation and Simulation 89.17 (2019): 3258-3272.
+Larson, Martin G. "Analysis of variance." Circulation 117.1 (2008): 115-121.
+Van Es, G. W. H. "Analysis of aircraft weight and balance related safety occurrences." (2007).
+
+
+
