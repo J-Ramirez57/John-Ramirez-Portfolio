@@ -1,0 +1,492 @@
+---
+title: "Final Report"
+author: "DevonGrace Tax, Maggie Truong, Michael Helm, John Ramirez, Smyan Jaipuriyar"
+output: 
+  pdf_document: 
+    latex_engine: xelatex
+header-includes: 
+  - \usepackage[none]{hyphenat}
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# *Introduction*
+
+For our project, we focused on two main research questions to explore what factors contribute to team success in NCAA Division I basketball. The **first question** looks at the relationship between a team’s defensive efficiency (`ADJDE`) and how far they progress in the NCAA tournament during the 2021 to 2024 seasons. Adjusted Defensive Efficiency (`ADJDE`) measures how many points a team allows per 100 possessions, which accounts for differences in the pace of play. The **second question** investigates how a team’s three-point shooting accuracy (Offp_3p) and free throw rate (`FTR`) influence their win percentage (`W/G`) and postseason success.
+
+  - **Null Hypothesis 1:** Teams with better defensive efficiencies do not perform better in the tournament or make it further than teams with weaker defensive metrics. 
+  - **Alternative Hypothesis 1:**  We hypothesize that teams with better defensive efficiencies will perform better in the tournament and make it further than teams with weaker defensive metrics. 
+  
+  - **Null Hypothesis 2:**  Offensive metrics such as three-point shooting accuracy and free throw rate are not positively associated with a team’s ability to win games or perform well in the postseason.
+  - **Alternative Hypothesis 2:** We hypothesize that these offensive metrics are positively associated with a team’s ability to win games and perform well in the postseason.
+
+\
+\
+The dataset we are using includes [NCAA Division 1 College Basketball statistics from 2013 to 2023](https://www.kaggle.com/datasets/andrewsundberg/college-basketball-dataset), although there is no postseason data for the 2020 season due to COVID-19. Originally, the dataset had 368 rows and 24 columns, covering a wide range of stats from over 10 years. For this project, we shortened the scope to focus on the seasons from 2021 to 2024 and cleaned the data to make it more relevant to our research questions. This allows us to concentrate on recent trends and ensures the analysis stays manageable.\
+\
+This project is important because it helps us better understand what factors really matter for success in NCAA basketball. These insights could be useful for coaches, players, and analysts looking to improve team strategies, as well as for fans who want a deeper understanding of how the game works. Additionally, the project ties into the growing field of sports analytics and shows how data can be used to evaluate and predict team performance.
+
+```{r, echo=FALSE, message=FALSE, warning = FALSE, error = FALSE}
+library(dplyr)
+library(knitr)
+library(tibble)
+library(readr)
+library(ggplot2)
+library(nnet)   
+library(PRROC)   
+library(tidyverse)
+library(caret)
+library(broom)
+library(gridExtra)
+library(knitr)
+library(kableExtra)
+library(pROC) 
+
+cbb <- read_csv("~/PSTAT 100/Final Project/cbb2.csv")
+```
+
+# *Exploratory Data Analysis (EDA)*
+
+During this phase of our project we attempted to take a deeper look into the data itself and draw conclusions and insights from it. 
+
+1. We dealt with NA values in the dataset
+
+- These NA values that were encountered made sense that they were left NA as they dealt with post season seeds, and round exits
+  - For the `POSTSEASON` variable NA value we changed it to "Did Not Make PostSeason"
+  - For the `SEED` variable we changed the NA value to "No Postseason"
+  
+- Aside from that mentioned above, the dataset was well-structured, and there were no issues with the other variables.
+    
+2. Create Descriptive Statistics
+
+  - We took the numerical variables to see how the summary statistics looked, it was able to give us insights on the range and other metrics like mean for the variables to better understand the data we dealt with (Not included as it is quite long). This helped guide us in our data visualization.
+  
+3. Data Visualization
+
+From the heat map below that shows correlations between our variables of interest for the hypothesis we created, we are able to see that: 
+
+1. A strong positive correlation between Adjusted Defensive Efficiency (ADJDE) and Win Percentage (Win_P), suggesting that better defensive performance is closely tied to team success.
+2. Moderate positive correlation between Free Throw Rate (FTR) and Win Percentage (Win_P). Teams that get to the free-throw line more often tend to perform better overall.
+3. Offensive 3-Point Shooting Percentage (Offp_3p) and Adjusted Defensive Efficiency (ADJDE) is weak, implying that a team's offensive 3-point shooting doesn't significantly impact their defensive efficiency.
+
+```{r, echo=FALSE, message=FALSE, warning = FALSE, error = FALSE, results='hide',  fig.width = 4, fig.height = 3}
+
+# Add a calculated column for win percentage
+cbb <- cbb %>%
+  mutate(Win_P = Wins / Games)
+
+# Select variables for the heatmap
+cbb_heatmap <- cbb %>%
+  select(ADJDE, Offp_3p, FTR, Win_P, POSTSEASON)
+
+# Calculate correlation matrix
+cor_matrix <- cbb_heatmap %>%
+  select(-POSTSEASON) %>%
+  cor(use = "complete.obs")
+
+# Convert to long format
+cor_long <- as.data.frame(as.table(cor_matrix))
+colnames(cor_long) <- c("Metric1", "Metric2", "Correlation")
+
+# Heatmap: Correlation between metrics
+ggplot(cor_long, aes(x = Metric1, y = Metric2, fill = Correlation)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(
+    low = "yellow",
+    high = "red",
+    mid = "white",
+    midpoint = 0,
+    limit = c(-1, 1),
+    space = "Lab",
+    name = "Correlation"
+  ) +
+  labs(title = "Correlation Heatmap of Team Metrics", x = "Metric", y = "Metric") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(
+    angle = 45,
+    vjust = 1,
+    hjust = 1
+  ))
+```
+
+# *Modeling Process*
+
+To investigate our two research questions, we implemented distinct models each carefully selected to best fit the characteristics of each hypothesis and the dataset.
+
+For **Hypothesis 1**, a **classification model** was the most appropriate choice. Postseason success is a categorical variable, represented by discrete stages such as "R64," "E8," or "Champions," rather than continuous numeric values. Therefore, we implemented a multinomial logistic regression model to classify teams into postseason categories based on their defensive metrics. This approach allowed us to predict the likelihood of a team reaching various stages in the NCAA tournament, providing insights into how defensive efficiency impacts postseason progression.\
+\
+For **Hypothesis 2**, we chose to utilize a **regression model**. These offensive metrics (three-point shooting accuracy `(Offp_3p)` and free throw rate `(FTR)`) and win percentage `(WinPerc)` are continuous variables, making linear regression an ideal method for identifying and quantifying the strength of the relationship between shooting efficiency and win rates. By combining the effects of `Offp_3p` and `FTR`, we aimed to determine how these key offensive factors contribute to overall team success throughout the season. We also implemented a logistic regression model for predicting postseason outcomes (categorical variable like "Champions," "Elite Eight") based on the same predictors (Offp_3p and FTR).
+
+# [Hypothesis 1: Classification Model for Predicting Postseason Success]{.underline}
+
+## *Results*
+
+-   **Model Description and Evaluation**
+
+We applied a multinomial logistic regression model to predict the postseason success of NCAA basketball teams based on defensive efficiency (`ADJDE`). The dataset was filtered to include only teams that made the postseason, with `POSTSEASON` treated as a categorical variable. After splitting the data into a 70% training set and 30% test set, we fit the model using the `nnet` package's `multinom()` function. The model converged after 70 iterations.
+
+```{r, echo=FALSE, message=FALSE, warning = FALSE, error = FALSE, results='hide', fig.width = 4, fig.height = 4}
+#filter data for POSTSEASON
+cbb1 <- cbb %>% 
+  filter(POSTSEASON != "Did Not Make PostSeason") %>%
+  mutate(POSTSEASON = factor(POSTSEASON))
+
+#split data into training sets and test sets
+set.seed(123)
+sample <- sample(c(TRUE, FALSE), nrow(cbb1), replace = TRUE, prob = c(0.7, 0.3))
+train <- cbb1[sample, ]
+test <- cbb1[!sample, ]
+
+#multinomial logistic regression model
+model <- multinom(POSTSEASON ~ ADJDE, data = train)
+
+#probabilities for the test dataset
+predicted_probs <- predict(model, test, type = "probs")
+
+test$POSTSEASON <- factor(test$POSTSEASON, levels = levels(train$POSTSEASON))
+
+predicted_classes <- colnames(predicted_probs)[apply(predicted_probs, 1, which.max)]
+
+predicted_classes <- factor(predicted_classes, levels = levels(test$POSTSEASON))
+
+```
+
+-   **Accuracy and Confusion Matrix**
+
+The model achieved an accuracy of **51.94%**, indicating it correctly classified the postseason stage approximately half the time. While this suggests moderate predictive power, further improvement is possible by incorporating additional predictors. Below is a summary of the confusion matrix (Columns are from Orginal Categories, Rows are the predicted):
+
+```{r, echo=FALSE, message=FALSE, warning = FALSE, error = FALSE}
+
+#confusion  matrix
+conf_matrix <- confusionMatrix(data = predicted_classes, reference = test$POSTSEASON)
+
+#output table of matrix
+kable(conf_matrix$table)
+```
+
+The matrix reveals that the model struggles with less frequent categories as seen with “2ND,” “Champions,” “Elite Eight” (E8), and others, where the model fails to predict any instances accurately. However, it performs reasonably well for more common categories like “R64” and “R32,” reflecting class imbalance issues where these categories have more observations in comparison to the less frequent stages like those listed above.
+
+```{r, echo=FALSE, message=FALSE, warning = FALSE, error = FALSE, results='hide'}
+#ACCURACY
+#How we got that the model achieved accuracy of 51.94%
+accuracy <- mean(predicted_classes == test$POSTSEASON)
+print(paste("Accuracy:", round(accuracy * 100, 2), "%"))
+
+#Overall accuracies from confusion matrix
+conf_matrix$overall
+```
+
+## ***Interpretation***
+
+The model's moderate accuracy shows how it is necessary to have additional predictors to enhance its predictive capability. It performs better at predicting early postseason stages due to the larger sample sizes available (these stages have more observations in the dataset), while later stages suffer from insufficient data. The confusion matrix shows a bias toward more frequent classes, with “R64” being correctly predicted 96 times but often confused with “R32” (on 35 accounts) and “S16” (on 10 accounts)
+
+-   [Key Takeaways:]{.underline}
+
+1.  The accuracy can be improved by including more predictors such as offensive efficiency or team experience.
+
+2.  Increasing the dataset size, especially for less frequent classes like “Champions,” could help the model better generalize to all stages.
+
+3.  Applying class balancing techniques or weighted loss functions could mitigate the impact of class imbalance.\
+    \
+
+## *Visualization and Communication*
+
+\
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE,  fig.width = 4, fig.height = 4}
+library(ggplot2)
+
+# df actual vs. predicted classes
+results_df <- data.frame(
+  Actual = test$POSTSEASON,
+  Predicted = predicted_classes
+)
+
+# predicted vs. actual
+ggplot(results_df) +
+  geom_bar(aes(x = Actual, fill = "Actual"), alpha = 0.6, position = "dodge") +
+  geom_bar(aes(x = Predicted, fill = "Predicted"), alpha = 0.6, position = "dodge") +
+  labs(
+    title = "Distribution of Predicted vs. Actual Classes",
+    x = "Postseason Stage",
+    y = "Count",
+    fill = "Class Type"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+        plot.title = element_text(size = 10))
+
+```
+
+##### *This bar graph compares the predicted and actual postseason stages, highlighting discrepancies between them. The blue bar represents the amount or predictions for each category where the pink is the actual number per category.*
+
+-   [Commentary & Relevance]{.underline}
+
+The bar graph shows that the predictions for “R64” exceeded actual outcomes, while predictions for “R32” closely aligned with the actual outcomes. As for the other categories, predictions for later stages like “S16” and “E8” were minimal or non-existent. We can see that amount of prediction decreases over these other categories (if any at all). This can be assumed to be because of the bias toward most frequent classes– as mentioned earlier– since there are more observations to train/test on with the early round exits (such as `R64` and `R32`), where as later round exits (such as `S16` and under) struggle and have weak predicting power. This underscores the need for more data on these stages.
+
+\
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE,  fig.width = 5, fig.height = 4}
+
+pr_data <- list()
+
+for (i in seq_along(levels(test$POSTSEASON))) {
+  class <- levels(test$POSTSEASON)[i]
+  
+  # get labels 
+  true_labels <- as.numeric(test$POSTSEASON == class)
+  
+  # get predicted probabilities 
+  predicted_probs_class <- predicted_probs[, i]
+  
+  # precision-recall curve
+  pr <- pr.curve(scores.class0 = predicted_probs_class, weights.class0 = true_labels, curve = TRUE)
+  
+  pr_data[[class]] <- data.frame(Recall = pr$curve[, 1], Precision = pr$curve[, 2], Class = class)
+}
+
+# singular dataframe
+pr_combined <- bind_rows(pr_data)
+
+# precision-recall curves for each iteration (class)
+ggplot(pr_combined, aes(x = Recall, y = Precision, color = Class)) +
+  geom_line(size = 1) +
+  labs(
+    title = "Precision-Recall Curve for Classification of Postseason Results",
+    x = "Recall",
+    y = "Precision",
+    color = "Class"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+```
+
+##### Above, the visualization depicts Precision-recall (PR) curves for each class show varying model performance across postseason stages.
+
+-   [Commentary & Relevance]{.underline}
+
+The PR curves highlight the model's strengths and weaknesses across classes. The model performs best for “Champions,” maintaining high precision at low recall levels. As for the early stages including “R68," "R64," and “S16," these classes show inconsistent precision, which indicates difficulty in predicting earlier rounds. Also, it can be seen tht there are a series of sharp spikes throughout the PR curves for "Elite 8" and "R68," suggesting potential overfitting. Objectively, we can say that the model can improve in areas like feature selection, class balancing, and data expansion to enhance its predictive accuracy for later stages. But overall, this model proves to promisingly predict early-stage postseason outcomes.
+
+##### Hypothesis Conclusion
+We fail to reject null hypothesis (p = 0.3638), thus defense efficiency is not a significant factor for postseason advancement
+
+# [Hypothesis 2: Regression Models for Predicting Team Success (Win Percentage and Postseason Success)]{.underline}
+
+# *(1) Linear Regression Model: Predicting Win Percentage*
+
+## *- Results 1*
+
+-   **Model Descriptions and Evaluations**
+
+    We used a linear regression model to predict Win Percentage (WinPerc) based on 3-Point Efficiency (Offp_3p) and Free Throw Rate (FTR).
+
+-   **Summary of Win Percentage Model Key Takeaways:**
+
+    -   The model's summary (given below) shows insights into the significance of the predictors. The summary explains how the model produced significant coefficients for Offp_3p and FTR, indicating their influence on win percentage.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+cbb <- cbb %>%
+  mutate(WinPerc = Wins / Games)
+
+#lm for Win % with 3 pointer and free throw efficiency 
+winperc_model <- lm(WinPerc ~ Offp_3p + FTR, data = cbb)
+summary(winperc_model)
+```
+
+
+## *- Visualizations 1 & 2 (for Linear Regression Model)*
+
+-   *Interpretation for Visualization 1 (left visual pm page 7)*
+
+This visualization of the Effect of 3-Point and Free Throw Efficiency on Win Percentage (Visualization 1) shows the positive correlation between combined efficiency (3-point percentage + free throw rate) and win percentage. Teams with higher shooting efficiency tend to achieve higher win percentages.
+
+-   *Interpretation for Visualization 2 (right visual on page 7)*
+
+The scatter plot (Visualization 2) compares the actual win percentages with the predicted ones for the Actual vs Predicted Win Percentage visualization. The RMSE indicates how well the model fits the data, and the equation shows the linear relationship. The smaller the RMSE, the better the fit.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE,fig.width = 6.5, fig.height = 4}
+# Combined efficiency (Offp_3p + FTR)
+cbb <- cbb %>% mutate(combined_efficiency = Offp_3p + FTR)
+
+# Linear model for regression line in the first plot
+lm_fit2 <- lm(WinPerc ~ combined_efficiency, data = cbb)
+
+# Extract intercept and slope for the abline
+intercept2 <- coef(lm_fit2)[1]
+slope2 <- coef(lm_fit2)[2]
+equation2 <- paste("y = ", round(intercept2, 3), " + ", round(slope2, 3), "x")
+
+# Scatter plot with regression line, abline, and equation
+scatter_plot <- ggplot(cbb, aes(x = combined_efficiency, y = WinPerc)) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "blue", formula = y ~ x, se = FALSE) +
+  geom_abline(intercept = intercept2, slope = slope2, color = "black", linetype = "dashed") +
+  annotate("text", x = 45, y = 1.1, label = equation2, hjust = 0, size = 4, color = "black") +
+  labs(
+    title = "Effect of 3-Point and Free Throw Efficiency on Win Percentage",
+    x = "3-Point and Free Throw Efficiency",
+    y = "Win Percentage"
+  ) + 
+    theme(
+    plot.title = element_text(size = 7, face = "bold", hjust = 0.5) 
+  )
+
+# Predicted win percentage
+predicted_winperc <- predict(winperc_model, cbb)
+
+# Calculate RMSE
+RMSE <- sqrt(mean((cbb$WinPerc - predicted_winperc)^2))
+print(paste("RMSE: ", RMSE))
+
+# Linear model for actual vs predicted
+lm_fit1 <- lm(predicted_winperc ~ cbb$WinPerc)
+
+# Extract intercept and slope
+intercept <- coef(lm_fit1)[1]
+slope <- coef(lm_fit1)[2]
+equation <- paste("y = ", round(intercept, 3), " + ", round(slope, 3), "x")
+
+# Actual vs Predicted Win Percentage plot
+actual_vs_predicted <- ggplot(data.frame(x = cbb$WinPerc, y = predicted_winperc), aes(x = x, y = y)) +
+  geom_point(color = "blue") +
+  geom_abline(intercept = intercept, slope = slope, color = "black", lwd = 1.5) +
+  labs(
+    title = "Actual vs Predicted Win Percentage",
+    x = "Actual Win Percentage",
+    y = "Predicted Win Percentage"
+  ) +
+  annotate("text", x = 0.2, y = 0.8, label = equation, hjust = 0, size = 4, color = "black")+ 
+  theme(plot.title = element_text(size = 8, face = "bold", hjust = 0.5)  )
+
+# plots side by side
+grid.arrange(scatter_plot, actual_vs_predicted, ncol = 2)
+
+
+```
+
+# (2) Logistic Regression Model: Predicting Postseason Success
+
+## *- Results 2*
+
+-   **Model Descriptions and Evaluations**
+
+We used a logistic regression model to predict Postseason Success (POSTSEASON) using Offp_3p and FTR.
+
+-   **Summary of Post Season Success Model Key Takeaways:**
+
+    -   **Offp_3p in the Summary:** A significant coefficient suggests that higher three-point shooting efficiency reduces the likelihood of a lower postseason outcome.
+
+    -   **FTR in the Summary:** This variable has less consistent significance, showing variability in its impact on postseason success.\
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Convert POSTSEASON to a factor
+cbb$POSTSEASON <- as.factor(cbb$POSTSEASON)
+
+# Logistic Regression Model
+postseason_model <- glm(POSTSEASON ~ Offp_3p + FTR, data = cbb, family = "binomial")
+summary(postseason_model)
+```
+
+-   **Coefficient Plot Key Takeaways:**
+
+    -   For the coefficient plot (shown below on page 9), the intercept has a large coefficient with a wide confidence interval, indicating high uncertainty in the baseline odds of postseason success.
+    -   Offp_3p has a negative estimate, suggesting a statistically significant negative relationship with postseason success.
+    -   FTR's confidence interval crosses zero, indicating it may have a weaker or non-significant impact on postseason success.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.width = 4, fig.height = 4}
+coefficients_postseason <- tidy(postseason_model)
+
+# Coefficient plot for logistic regression model
+ggplot(coefficients_postseason, aes(x = term, y = estimate)) +
+  geom_point(size = 4, color = "blue") +
+  geom_errorbar(aes(ymin = estimate - 1.96 * std.error, ymax = estimate + 1.96 * std.error), 
+                width = 0.2, color = "pink") +
+  labs(
+    title = "Coefficient Plot for Postseason Model",
+    x = "Predictor Variables",
+    y = "Coefficient Estimate"
+  ) +
+  theme_minimal()
+```
+
+\
+
+## *- Visualizations 3 & 4 (for Logistic Regression Model)*
+
+#### Visualization 3: Precision-Recall Curve for Postseason Outcomes
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE,  fig.width = 4.5, fig.height = 4}
+# Split data into training and testing sets
+set.seed(123)
+sample <- sample(c(TRUE, FALSE), nrow(cbb), replace = TRUE, prob = c(0.7, 0.3))
+train <- cbb[sample, ]
+test <- cbb[!sample, ]
+
+# Fit Multinomial Logistic Regression
+model2 <- multinom(POSTSEASON ~ Offp_3p + FTR, data = train)
+
+# Predict probabilities for the test set
+predicted_probs2 <- predict(model2, test, type = "probs")
+predicted_probs2 <- as.matrix(predicted_probs2)
+
+# Match POSTSEASON levels between train and test
+test$POSTSEASON2 <- factor(test$POSTSEASON, levels = levels(train$POSTSEASON))
+predicted_classes2 <- colnames(predicted_probs2)[apply(predicted_probs2, 1, which.max)]
+
+# Precision-Recall Curve (calculated)
+predicted_classes <- factor(predicted_classes2, levels = levels(test$POSTSEASON2))
+
+# Calculate ROC Curve for Multiclass ROC
+roc_multiclass2 <- multiclass.roc(test$POSTSEASON, predicted_probs2)
+
+# Overall AUC
+overall_auc_value2 <- auc(roc_multiclass2)
+print(paste("Multiclass AUC: ", overall_auc_value2))
+```
+
+\
+
+#### Visualization 4: ROC Curves for Postseason Classification
+
+\
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.width = 6, fig.height = 4}
+# ROC Curves for each class
+roc_curves2 <- list()
+for (class in levels(test$POSTSEASON2)) {
+  binary_labels2 <- as.numeric(test$POSTSEASON2 == class)
+  roc_curve2 <- roc(binary_labels2, predicted_probs2[, class])
+  roc_curves2[[class]] <- roc_curve2
+}
+
+# Plot ROC Curves
+plot(roc_curves2[[1]], col = "red", main = paste("ROC Curves-POSTSEASON Classification (Overall AUC = 0.549)"), lwd = 2, cex.main = 0.8)
+for (i in 2:length(roc_curves2)) {
+  lines(roc_curves2[[i]], col = rainbow(length(roc_curves2))[i], lwd = 2)
+}
+
+# Display AUC Values
+for (i in 1:length(roc_curves2)) {
+  auc_value2 <- auc(roc_curves2[[i]])
+  text(0.1, 0.55 - 0.05 * i, paste(levels(test$POSTSEASON2)[i], "AUC:", round(auc_value2, 2)), col = rainbow(length(roc_curves2))[i], cex = 0.8)
+}
+
+```
+
+## *- Interpretation for Visualizations 3 & 4*
+
+The AUC values that are higher means that our model did well at identifying teams that had that post season ranking. The highest AUC was for Champions and was 0.84 which means that our model was fairly good at identifying its overall discriminatory power for each classification category. We see that the model demonstrates it best performs at differentiating "Champions" (AUC: 0.84) and reasonably well for "2ND" (AUC: 0.76) and "Elite Eight" (AUC: 0.72). Nevertheless, it has trouble distinguishing these classes from others in previous rounds such as "R68" (AUC: 0.549), which may be because of less clear patterns or unbalanced data.
+
+#### Hypothesis Conclusion
+
+We reject the null hypothesis, (p = 2.2e-16), thus 3 point percentage and free throw rate positively affects win percentage.
+
+We reject the null hypothesis, (p = 0.003), thus 3 point percentage and free throw rate positively affects post season ranking.
+
+# Conclusion and Recommendations
+Overall in our findings we can see that our regression model did a good job in predicting champions but struggled with predicting earlier rounds. We determined that there's a high correlation between 3 point percentage and free throw accuracy on win percentage but might not be the only factors. We could enhance the dataset by collecting additional data, particularly for underrepresented categories, to improve the classification model’s ability to predict these stages more accurately. Expanding the dataset will reduce biases caused by imbalanced data. We could also include more diverse variables to provide a holistic view of team performance. Overall the analysis focuses on offensive metrics, which limits the scope of the insights. Other critical aspects such as turnovers or rebounds should be taken into account to gain a more comprehensive understanding of success in basketball. We also notice a lack in contexual metrics, We can say that the data fails to include contextual metrics such as home-court advantage and player injuries, which are factors that may influence a team’s success. Additionally in regards to seasonal patterns, it doesn't include how the team performance changes overtime, such as improvements/declines throughout the season. 
+
