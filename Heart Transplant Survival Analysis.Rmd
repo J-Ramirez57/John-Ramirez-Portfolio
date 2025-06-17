@@ -1,0 +1,367 @@
+---
+title: "Heart Transplant Survival Analysis"
+author: "Siddharth Singh, John Ramirez, Gabriel Rosario"
+date: "2025-05-18"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+Heart failure is a life-threatening condition that often leaves heart transplantation as the only viable long-term treatment option. However, because donor hearts are scarce and transplants are risky, researchers need to understand which patients benefit most from the procedure. The Stanford Heart Transplant Program was one of the earliest clinical efforts to explore this question. As part of this effort, the program collected detailed medical and survival data on patients who were accepted into the transplant program. Their goal was to determine whether receiving a heart transplant actually helped patients live longer and how other health-related factors—such as age, prior surgeries, or physical condition—might influence the outcome (Crowley and Hu, 1977).
+
+In this project, we analyze data from the jasa dataset in the survival package in R. This dataset is based on the Stanford Heart Transplant Study and includes information on 103 patients. Each patient’s record contains important dates—such as the date of acceptance into the program, the date of transplant if one occurred, and the date of last follow-up or death—as well as clinical variables like age, history of bypass surgery, transplant rejection, and a pre-transplant performance score. These measurements provide a rich view of each patient’s medical background and treatment experience (Therneau, 2023).
+
+The outcome we are studying is survival time, which is defined as the number of days from the date a patient was accepted into the transplant program until either death or the end of follow-up. This is recorded in the variable futime. Whether the patient died or was censored is recorded in the variable fustat, where a value of 1 indicates that the patient died during the study period, and 0 indicates that the patient was censored (still alive at last contact or lost to follow-up). These two variables form the foundation of our survival analysis.
+
+To better understand what affects survival, the dataset includes several important covariates. These include each patient's age in years at the time they joined the study, whether they had undergone previous bypass surgery (surgery), whether or not they eventually received a transplant (transplant), and how many days they waited between acceptance and transplant (wait.time). We also have information on whether the patient experienced transplant rejection (reject). In addition to these covariates, the dataset includes several time-related variables: birth.dt, the patient’s date of birth; accept.dt, the date they were accepted into the transplant program; tx.date, the date of transplant (if one occurred); and fu.date, the date of final follow-up. The time from acceptance to the end of follow-up is recorded as futime (in days), and the event indicator (fustat) is equal to 1 if the patient died and 0 if they were censored. 
+
+In our restructured dataset for time-dependent analysis, we further define variables start and stop to mark each patient’s risk interval and transplant_status to indicate whether the transplant occurred during that interval. All variables are recorded in meaningful units, such as years, days, or binary indicators.
+
+The primary research question for our study and the focus of our analysis is: Does receiving a heart transplant significantly reduce the risk of death among patients accepted into the program? This question focuses on the effect of the transplant intervention, but also requires us to consider how other health factors may impact survival. While we are especially interested in the effect of the transplant itself, we also take into account other factors like age, prior surgery, and overall health that could influence survival.
+
+For patients who received a transplant, the timing of the procedure varies. To account for this, we later divide their follow-up time into separate intervals — before and after transplant — so that the effect of the treatment can be properly modeled. This time-splitting approach allows us to reflect how a patient's transplant status changes over time and to use survival models that handle time-dependent covariates appropriately.
+
+To begin addressing this question, we use Kaplan–Meier survival curves to compare patients who received a transplant with those who did not. This method provides a non-parametric estimate of the survival function and allows us to visually assess differences in survival between the two groups. The Kaplan–Meier curves give us an initial understanding of how survival varies by treatment, and they serve as a useful starting point for more detailed modeling using the Cox proportional hazards model in the next section.
+
+
+
+# Kaplan–Meier Plots
+## Kaplan–Meier Plot by Transplant Status
+```{r, warning=FALSE, message=FALSE, out.height='40%'}
+library(survival)
+library(survminer)
+
+surv_obj <- Surv(time = jasa$futime, event = jasa$fustat)
+km_fit <- survfit(surv_obj ~ transplant, data = jasa)
+
+ggsurvplot(km_fit, data = jasa, pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           xlab = "Days Since Acceptance", ylab = "Survival Probability",
+           legend.labs = c("No Transplant", "Transplant"),
+           title = "Kaplan–Meier Survival Curves by Transplant Status")
+```
+
+To explore the relationship between transplant status and survival, we estimated Kaplan–Meier survival curves for patients who received a transplant and those who did not. As shown in Figure 1, patients who received a transplant had noticeably better survival over time. The difference between the two groups is statistically significant (p < 0.0001), suggesting that transplant status may play a major role in reducing the risk of death. This plot provides early visual support for our research question and motivates the use of more formal modeling techniques to account for other factors that may influence survival.
+
+
+## Histogram of Age at Acceptance
+```{r, out.height='40%'}
+library(ggplot2)
+
+ggplot(jasa, aes(x = age)) +
+  geom_histogram(binwidth = 5, fill = "skyblue", color = "black") +
+  labs(title = "Distribution of Age at Acceptance",
+       x = "Age (years)", y = "Number of Patients")
+```
+This histogram displays the distribution of patient age at the time of acceptance into the transplant program. The majority of patients were between 40 and 60 years old, with fewer very young or very old patients. Because age is a known risk factor in many medical outcomes, we include it as a covariate in our survival models to adjust for its potential influence on mortality.
+
+## Bar Plot of Transplant vs. No Transplant Counts
+```{r, out.height='40%'}
+ggplot(jasa, aes(x = factor(transplant, labels = c("No Transplant", "Transplant")))) +
+  geom_bar(fill = "lightgreen", color = "black") +
+  labs(title = "Number of Patients by Transplant Status",
+       x = "Transplant Status", y = "Count of Patients")
+```
+This bar plot summarizes how many patients in the study received a heart transplant. A majority of patients underwent transplantation, while a smaller group remained on the waiting list. This breakdown highlights the importance of comparing survival outcomes between these two groups, as the decision and timing of transplantation may significantly impact patient survival.
+
+
+## Kaplan–Meier by Prior Bypass Surgery
+```{r, out.height='40%'}
+km_surg <- survfit(surv_obj ~ surgery, data = jasa)
+ggsurvplot(km_surg, data = jasa, pval = TRUE, conf.int = TRUE,
+           legend.labs = c("No Surgery", "Surgery"),
+           title = "Survival Curves by Prior Bypass Surgery")
+```
+In addition to transplant status, other clinical factors such as prior bypass surgery may also influence survival outcomes. This KM Plot compares survival curves between patients with and without a history of bypass surgery. The group that had surgery appears to have slightly better survival overall. The p-value of 0.035 suggests a statistically significant difference, which supports including this variable as a covariate in our survival model to adjust for potential confounding.
+
+
+
+# Model Fitting
+## Data Cleaning and Preparation
+```{r, warning=FALSE, message=FALSE}
+library(dplyr)
+jasa <- survival::jasa
+jasa <- jasa %>%
+  select(-mismatch, -hla.a2, -mscore)
+```
+
+Before fitting any models, we cleaned the dataset to remove variables that were not part of our planned analysis. In particular, we excluded three mismatch-related variables: mismatch, hla.a2, and mscore because these were not included in our modeling strategy.
+
+```{r}
+jasa$id <- seq_len(nrow(jasa))
+
+#View(jasa)
+```
+
+Since the dataset did not originally contain a patient identifier, we created a new id column that uniquely labels each patient. This allowed us to later assign an episode number to track multiple risk intervals per person.
+
+
+
+## Adding Episode variable (this can change)
+```{r, message=FALSE}
+library(lubridate)
+
+# Patients with no transplant
+no_transplant <- jasa %>%
+  filter(is.na(tx.date)) %>%
+  mutate(start = 0, stop = futime, episode = 1, transplant_status = 0) %>%
+  select(id, birth.dt, accept.dt, tx.date, start, stop, fustat, age,
+         surgery, reject, wait.time, episode, transplant_status)
+
+# Patients with transplant
+got_transplant <- jasa %>%
+  filter(!is.na(tx.date)) %>%
+  mutate(tx_time = as.numeric(difftime(tx.date, accept.dt, units = "days")),
+         stop = futime)
+
+# Episode 1: Before transplant
+pre_tx <- got_transplant %>%
+  transmute(id, birth.dt, accept.dt, tx.date, start = 0, stop = tx_time,
+            fustat = 0, age, surgery, reject = 0, wait.time, episode = 1,
+            transplant_status = 0)
+
+post_tx <- got_transplant %>%
+  transmute(id, birth.dt, accept.dt, tx.date, start = tx_time, stop = futime,
+            fustat = fustat, age, surgery, reject, wait.time, episode = 2,
+            transplant_status = 1)
+# Combine both groups
+jasa_split <- bind_rows(no_transplant, pre_tx, post_tx) %>%
+  arrange(id, episode)
+
+jasa_split <- jasa_split %>%
+  arrange(id, episode) %>%
+  mutate(
+    # Only allow reject to be 1 in post-transplant period (episode 2)
+    reject = ifelse(episode == 2, reject, 0),
+    
+    # Define time-varying effect: reject * log(time)
+    logtime = log(stop - start + 1),  # Add 1 to avoid log(0)
+    reject_tv = reject * logtime
+  )
+
+#View(jasa_split)
+```
+To model changes that happen over time, we reorganized the dataset so that each patient could have more than one observation interval. If a patient received a transplant during the study, we split their follow-up time into two parts: one for the period before the transplant and one for the period after. This structure reflects that transplant status is not fixed from the start — it can change during the course of observation.
+
+We created a variable transplant_status to indicate whether the patient had received the transplant during each interval (0 = before transplant, 1 = after). We also added an episode variable to track the sequence of time intervals for each patient: episode = 1 for the first period and episode = 2 for the second. The first interval captures the time from program acceptance to the transplant date, during which the patient had not yet received a transplant. The second interval covers the time from transplant to either death or censoring. For example, a patient who received a transplant would appear twice in the dataset — once before the transplant and once after.
+
+This setup allows us to use the (start, stop, event) format required for Cox models with time-dependent covariates, and ensures that each time interval is matched with the correct values of the relevant variables.
+
+
+## Models
+### Model 1
+```{r, warning=FALSE}
+model1 <- coxph(Surv(futime, fustat) ~ transplant + age 
+                + surgery, data = jasa)
+summary(model1)
+AIC(model1)
+```
+We fit a Cox Proportional Hazards model to see the impact of transplant status, age, and surgery on patient survival. The model showed that both transplant status and age were statistically significant predictors of survival. Patients who received a transplant had a significantly lower hazard of death compared to those who did not, with that being a hazard ratio = 0.18 and 95% CI: 0.10–0.31, with p < 0.001. Additionally, increasing age was associated with a higher risk of death, with each one-year increase in age resulting in a 6% increase in hazard, that being a HR = 1.06, and 95% CI: 1.03–1.09, with p < 0.001.The coefficient for surgery suggested a potential protective effect, a HR = 0.66, this was not statistically significant as the 95% CI: 0.32–1.36 had p = 0.259. The overall fit of the model was strong, supported by highly significant likelihood ratio, Wald, and score tests, all p < 0.001. The AIC for the model was 556.39, providing a baseline value for comparing the fit of this model to alternative specifications; lower AIC values in other models would suggest better fit.
+
+```{r, warning=FALSE, message=FALSE}
+library(tidyr)
+library(MASS)
+
+jasa_clean <- jasa_split %>%
+  drop_na(transplant_status, age, surgery, reject, wait.time, fustat, 
+          start, stop)
+
+
+step_model <- stepAIC(
+  object = coxph(Surv(start, stop, fustat) ~ 1, data = jasa_clean),
+  scope = list(lower = ~1,upper = ~ transplant_status + age + surgery + reject
+               + wait.time), direction = "forward")
+
+summary(step_model)
+```
+We used forward stepwise selection with the Akaike Information Criterion (AIC) to identify the best Cox proportional hazards model for predicting survival time. Starting from a null model, we added covariates one at a time based on which most reduced the AIC. Prior to model fitting, we excluded 41 observations with missing values in one or more modeling variables. The final model, selected from a candidate set including transplant status, age, surgery, rejection, and wait time, retained the covariates transplant rejection, transplant status, and surgery. The model had a concordance of 0.747 and a minimum AIC of 255.62. Transplant rejection was a highly significant predictor (HR = 3.66, p < 0.001), while transplant status and surgery were not statistically significant.
+
+
+### Model 2
+```{r, warning=FALSE}
+model_interaction <- coxph(Surv(start, stop, fustat) ~ age * episode, 
+                           data = jasa_split)
+summary(model_interaction)
+```
+To investigate whether the effect of age differed before and after transplant, we fit a Cox proportional hazards model that included an interaction between age and episode, where episode = 1 represents the pre-transplant period and episode = 2 the post-transplant period. The model included 168 observations and 73 events. The main effect of age (in episode 1) was not statistically significant (HR = 0.97, 95% CI: 0.89–1.05, p = 0.405), indicating little evidence that age was associated with survival before transplant. The interaction term (age × episode) had a hazard ratio of 1.05 (95% CI: 0.99–1.11, p = 0.108), suggesting a possible shift toward a slightly higher hazard for older patients post-transplant, but this effect was not statistically significant. The overall model concordance was 0.575, indicating poor predictive performance. 
+
+```{r, warning=FALSE}
+step_model_interaction <- stepAIC(
+  object = coxph(Surv(start, stop, fustat) ~ 1, data = jasa_clean),
+  scope = list(lower = ~1,upper = ~ transplant_status + age * episode 
+               + surgery + reject + wait.time), direction = "forward")
+
+summary(step_model_interaction)
+```
+We used Cox proportional hazards modeling to analyze the time to death for patients in a heart transplant study. To identify the most appropriate model, we applied forward stepwise selection using the Akaike Information Criterion (AIC). Starting from the null model, variables were added one by one from a candidate set that included transplant status, age, prior surgery, rejection, wait time, and episode. The stepwise procedure consistently selected the same final model, regardless of whether episode was included in the scope.
+
+The final model included transplant rejection, transplant status, and prior bypass surgery. It was fit on 131 observations with 40 events, after dropping 3 observations due to missing data. The model had a concordance of 0.747, indicating good discriminatory ability, and an AIC of 255.62, the lowest among all models considered. Among the covariates, transplant rejection was the only statistically significant predictor (HR = 3.66, 95% CI: 1.80–7.44, p < 0.001), indicating that patients who experienced rejection had over three times the hazard of death compared to those who did not. Although transplant status and surgery were retained in the model, neither was statistically significant, and the coefficient for transplant status was extremely unstable, likely due to the limited number of post-transplant deaths.
+
+
+### Model 3(Best Model)
+```{r, warning=FALSE}
+tv_model <- coxph(Surv(start, stop, fustat) ~ transplant_status + surgery + 
+                  reject + reject_tv, data = jasa_clean)
+summary(tv_model)
+
+```
+
+Our final model looked at three main factors: whether the patient had a transplant rejection, whether they received a transplant, and whether they had prior bypass surgery. We also modeled how the effect of rejection changed over time using an interaction with the logarithm of time.
+
+The strongest result was for rejection. Patients who experienced transplant rejection were about 590 times more likely to die than those who did not (hazard ratio = 590.4, 95% CI: 51.7 to 6745.6). This effect was highly statistically significant (p < 0.001), providing strong evidence that rejection is a major risk factor for death.
+
+To account for the changing impact of rejection over time, we included a time-varying component (`reject_tv`). This term had a hazard ratio of 0.41 (95% CI: 0.27 to 0.62, p < 0.001), indicating that the effect of rejection decreased over time, patients were at much higher risk of death shortly after rejection, but that risk diminished as more time passed.
+
+The model also included transplant status, but the result was not informative. The estimated hazard ratio was over 52 million, with a p-value of 0.997. This extremely large and unstable estimate likely results from the fact that very few patients died after receiving a transplant, making it difficult for the model to accurately estimate the effect.
+
+The third covariate, prior bypass surgery, had a hazard ratio of 0.63 (95% CI: 0.23 to 1.69), suggesting a possible protective effect. However, the result was not statistically significant (p = 0.359), so we cannot draw any firm conclusions about its influence on survival.
+
+Overall, the model performed well. It had a concordance of 0.827, meaning it correctly ranked patients from low to high risk about 83% of the time indicating a strong level of predictive accuracy. The overall model fit was highly significant, with a likelihood ratio test statistic of 57.14 on 4 degrees of freedom and a p-value of 1 × 10^-11. This suggests that the model as a whole explains variation in survival quite effectively.
+
+
+
+
+# Checking Proportional Hazards Assumption
+## Cox ZPH Test
+```{r, warning=FALSE}
+zph_test <- cox.zph(tv_model)
+print(zph_test)
+```
+We used the Cox ZPH test to check whether the proportional hazards assumption held for each covariate in our time-varying model. The test results showed that the covariate reject violated the proportional hazards assumption, with a p-value of 7.8e-13. This indicates that the effect of rejection on survival changes over time. To address this, we included a time-varying component in the model by interacting reject with the logarithm of time. This interaction term was statistically significant, with a p-value of 9.0e-10, which suggests that the time-varying effect improved the model and accounted for the change in the effect of rejection over time.
+
+The other covariates in the model, transplant_status and surgery, did not show evidence of violating the proportional hazards assumption, with p-values of 1.00 and 0.44, respectively. This means their effects on the hazard of death appear to be constant over time.
+
+The global test for the model had a p-value of 3.2e-12, indicating a significant overall departure from proportional hazards. However, since we already modeled the non-proportional effect of rejection directly, this result is expected and not problematic. Including the time-varying effect for rejection helped correct the assumption violation and ensured the model remained appropriate and interpretable.
+
+```{r fig.show='hold', out.width='50%', warning=FALSE}
+plot(zph_test)
+```
+We also looked at some graphs to check if the model assumptions were met. These included Schoenfeld residual plots, which help show whether the effect of each variable stays the same over time. For the variable reject, the plot showed a clear curved trend, meaning that its effect changed during follow-up. This matches the earlier test result and confirms that we were right to include a time-varying version of reject in our model.
+
+For the other variables, transplant_status and surgery, the lines in the plots were relatively flat and stayed within the confidence bands, suggesting that their effects did not change over time. This supports the idea that those variables meet the proportional hazards assumption.
+
+Overall, the graphs backed up our test results and showed that the time-varying model was the right choice. It properly adjusts for the changing effect of reject, and the other variables appear to behave in a stable and time-constant manner.
+
+
+## Log-log Plot
+```{r fig.show='hold', out.width='50%', warning=FALSE, message=FALSE}
+library(survminer)
+
+# Kaplan-Meier fit by reject group
+fit_reject <- survfit(Surv(start, stop, fustat) ~ reject, data = jasa_clean)
+
+ggsurvplot(fit_reject, fun = "cloglog", legend.title = "Rejection Status",
+  legend.labs = c("No Rejection", "Rejection"),
+  xlab = "Time (days)", ylab = "log(-log(Survival Probability))",
+  title = "Log(-log) Survival Plot by Rejection")
+
+
+# Kaplan-Meier fit by surgery group
+fit_surgery <- survfit(Surv(start, stop, fustat) ~ surgery, data = jasa_clean)
+
+ggsurvplot(fit_surgery, data = jasa_clean, fun = "cloglog",
+  xlab = "Time (days)", ylab = "log(-log(Survival Probability))",
+  legend.title = "Surgery", legend.labs = c("No Surgery", "Surgery"),
+  title = "Log(-log) Survival Plot by Surgery")
+
+# Kaplan-Meier fit by transplant status group
+fit_tx <- survfit(Surv(start, stop, fustat) ~ transplant_status, data = jasa_clean)
+
+ggsurvplot(fit_tx, data = jasa_clean, fun = "cloglog",
+  xlab = "Time (days)", ylab = "log(-log(Survival Probability))",
+  legend.title = "Transplant", legend.labs = c("No Transplant", "Transplant"),
+  title = "Log(-log) Survival Plot by Transplant Status")
+```
+
+To check whether the proportional hazards assumption was reasonable for our covariates, we examined log(-log) survival plots for rejection status, prior bypass surgery, and transplant status. These plots help visualize whether the effect of each covariate on survival is consistent over time by showing if the survival curves for each group are roughly parallel. The curves for rejection status were clearly non-parallel, suggesting that the effect of rejection on survival changes over time and that the proportional hazards assumption is violated. In contrast, the curves for prior surgery and transplant status appeared fairly parallel, suggesting that their effects on the hazard of death were more stable across time. Based on this, we included a time-varying effect for rejection (using reject:logtime) in our model but kept the other variables in their standard Cox PH form.
+
+
+
+# Conclusions
+```{r}
+# Hazard Ratios
+exp(coef(tv_model))
+
+# 95% CI for the Hazard Ratios
+exp(confint(tv_model))
+```
+```{r}
+# Combine HR and 95% CI
+hr_table <- data.frame(
+  HR = exp(coef(tv_model)),
+  confint = exp(confint(tv_model))
+)
+
+# Rename columns
+colnames(hr_table) <- c("HR", "Lower95", "Upper95")
+
+# View table
+hr_table
+```
+The main question of this study was: Does getting a heart transplant or experiencing transplant rejection affect how long patients survive, and does the effect of rejection change over time?
+
+We found that transplant rejection had a very strong association with increased risk of death. The hazard ratio for rejection was 590.37, with a 95% confidence interval from 51.67 to 6,745.61. This indicates that patients who experienced rejection had a much higher risk of dying shortly after the event. The model also included a time-varying effect for rejection by interacting it with the logarithm of time. This time-dependent term had a hazard ratio of 0.41 (95% CI: 0.27 to 0.62), showing that the effect of rejection on the hazard of death decreased as time progressed. In other words, the risk associated with rejection was strongest immediately after it occurred, but it declined over time.
+
+The variable transplant_status, which indicates whether the patient received a transplant, had an extremely large hazard ratio of 52,641,480. However, the confidence interval ranged from 0 to infinity, and the p-value was not statistically significant. This suggests that the estimate was unstable, likely due to the small number of deaths occurring after transplant, and we cannot draw a clear conclusion about the effect of transplant status on survival.
+
+Prior bypass surgery had a hazard ratio of 0.63 (95% CI: 0.23 to 1.69), indicating a possible protective effect. However, this result was also not statistically significant, so we cannot say for certain whether surgery influenced survival in this population.
+
+Overall, the model results show that transplant rejection is a strong and time-varying risk factor for death. The effect is greatest early after rejection but diminishes with time. In contrast, transplant status and prior surgery did not have clear or statistically reliable effects in this dataset.
+
+
+
+# Advanced Methods
+## Time-varying Covariate Model
+To go beyond the standard Cox proportional hazards model, we included a time-varying covariate in our analysis. Specifically, we added an interaction between transplant rejection and the logarithm of time (reject_tv). This allowed the model to account for the fact that the effect of rejection on survival is not constant over time. By including this term, we were able to relax the proportional hazards assumption for rejection and model the changing risk more accurately.
+
+This approach was necessary because both the log(-log) survival plots and the Cox ZPH test showed that rejection violated the proportional hazards assumption. The final model showed that rejection greatly increased the hazard of death right after the event, but that this effect decreased over time. Using a time-varying effect allowed us to capture this important clinical detail and improve the fit of our model.
+
+## Cox PH Models with Non-linear Functions of the Covariates
+```{r, warning=FALSE}
+model_spline <- coxph(Surv(start, stop, fustat) ~ pspline(age) + transplant_status + 
+                        surgery + reject + reject_tv, data = jasa_clean)
+summary(model_spline)
+```
+To explore whether age had a nonlinear effect on survival, we fit a Cox model using pspline(age). This flexible approach allows the effect of age to vary across different ranges. However, the results showed that neither the linear component (p = 0.54) nor the nonlinear component (p = 0.46) was statistically significant. This suggests that modeling age nonlinearly does not improve predictive performance in this dataset.
+
+The rest of the model results were consistent with our earlier findings. Transplant rejection remained a strong predictor of increased hazard, with a hazard ratio of 539.32 and a 95 percent confidence interval from 42.75 to 6,801.83, indicating a sharply elevated risk of death following rejection. The interaction between rejection and log(time), which accounts for the time-varying effect, had a hazard ratio of 0.41 with a 95 percent confidence interval from 0.27 to 0.62, showing that the effect of rejection decreased over time.
+
+Transplant status had a very large estimated hazard ratio of 17,900,000, but the confidence interval ranged from zero to infinity, and the result was not statistically significant with a p-value of 1.00. This reflects instability in the estimate due to the small number of post-transplant deaths. Prior bypass surgery had a hazard ratio of 0.71 with a 95 percent confidence interval from 0.25 to 2.00, which was also not statistically significant, with a p-value of 0.51.
+
+The model’s concordance was 0.839, indicating strong predictive discrimination. The likelihood ratio test statistic was 60.35 on approximately 7.97 degrees of freedom, with a p-value of 4e-10, suggesting the model as a whole fits the data well.
+
+
+## Fraility Model
+```{r, warning=FALSE}
+model_frailty <- coxph(Surv(start, stop, fustat) ~ transplant_status + 
+                         surgery + reject + reject_tv + frailty(id), 
+                       data = jasa_clean)
+summary(model_frailty)
+```
+To see if there were hidden differences between patients that might affect survival, we used a frailty model, which adds a random effect for each patient. This approach is appropriate because some patients appear twice in the data — once before transplant and once after — so it accounts for potential within-subject correlation.
+
+The model showed that the random effect was not important. The estimated variance of the random effect was essentially zero, and the p-value was 1.00. This indicates that there was no evidence of additional variation between patients beyond what was already explained by the measured covariates.
+
+The results for the other variables were consistent with previous models. Transplant rejection had a strong effect on increasing the risk of death, with a hazard ratio of 590.4 and a 95 percent confidence interval from 51.62 to 6,751.42. This means that patients who experienced rejection were much more likely to die. The interaction between rejection and log(time) had a hazard ratio of 0.41, with a 95 percent confidence interval from 0.27 to 0.62, indicating that the risk associated with rejection decreased over time.
+
+Transplant status had a very large estimated hazard ratio of 21,940,000, but the result was not statistically significant, and the confidence interval ranged from zero to infinity. This suggests instability in the estimate, likely due to the low number of post-transplant deaths. Prior surgery had a hazard ratio of 0.63, with a 95 percent confidence interval from 0.23 to 1.69, and was also not statistically significant.
+
+The model had a concordance of 0.867, showing strong predictive performance. The overall likelihood ratio test statistic was 56.99 on 4 degrees of freedom, with a p-value of 1e-11, indicating that the model as a whole explained survival differences well.
+
+# References
+Crowley, J., and Hu, M. (1977). Covariance analysis of heart transplant survival data. Journal of the American Statistical Association, 72(357), 27–36.
+
+Garrett Grolemund, Hadley Wickham (2011). Dates and Times Made Easy with lubridate. Journal of Statistical Software, 40(3), 1-25. https://www.jstatsoft.org/v40/i03/.
+
+Kleinbaum, David G., and Mitchel Klein. Survival Analysis: A Self-Learning Text. 3rd ed., Springer, 2012. Statistics for Biology and Health.
+
+Therneau, T. (2023). A Package for Survival Analysis in R. R package version 3.5-7. https://cran.r-project.org/package=survival.
+
+Kassambara, A., and Kosinski, M. (2021). Survminer: Drawing Survival Curves using 'ggplot2'. R package version 0.4.9. https://cran.r-project.org/package=survminer.
+
+Wickham, H. (2024). tidyr: Tidy Messy Data. R package version 1.3.1. https://cran.r-project.org/package=tidyr.
+
+Venables, W. N., & Ripley, B. D. (2002). Modern Applied Statistics with S (4th ed.). R package version 7.3-60. https://cran.r-project.org/package=MASS.
